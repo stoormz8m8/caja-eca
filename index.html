@@ -142,8 +142,8 @@ button.item:hover{background:var(--surface2)}
 
 /* Barra inferior */
 nav.tabs{position:fixed;left:0;right:0;bottom:0;z-index:25;background:rgba(14,14,16,.96);backdrop-filter:blur(10px);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px);padding-left:env(safe-area-inset-left,0px);padding-right:env(safe-area-inset-right,0px)}
-nav.tabs .in{max-width:560px;margin:0 auto;display:grid;grid-template-columns:repeat(5,1fr)}
-nav.tabs button{background:none;border:0;padding:10px 4px 9px;display:flex;flex-direction:column;align-items:center;gap:4px;font-size:10.5px;font-weight:600;color:var(--dim);letter-spacing:.02em}
+nav.tabs .in{max-width:560px;margin:0 auto;display:grid;grid-template-columns:repeat(6,1fr)}
+nav.tabs button{background:none;border:0;padding:10px 2px 9px;min-width:0;display:flex;flex-direction:column;align-items:center;gap:4px;font-size:10px;font-weight:600;color:var(--dim);letter-spacing:0}
 nav.tabs button svg{width:21px;height:21px}
 nav.tabs button.on{color:var(--ivory)}
 nav.tabs button.on svg{color:var(--ruby-hi)}
@@ -213,6 +213,7 @@ nav.tabs button.on svg{color:var(--ruby-hi)}
     <button data-tab="inicio" class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/></svg>Inicio</button>
     <button data-tab="agenda"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>Eventos</button>
     <button data-tab="gastos"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg>Gastos</button>
+    <button data-tab="inventario"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8l-9-5-9 5v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/></svg>Inventario</button>
     <button data-tab="tarjetas"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M6 15h4"/></svg>Tarjetas</button>
     <button data-tab="reportes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>Reportes</button>
   </div>
@@ -249,7 +250,7 @@ const EXTRA_HORA = 1000;
 
 const S = {
   db:null, dl:true, config:null,
-  eventos:[], gastos:[], tarjetas:[],
+  eventos:[], gastos:[], tarjetas:[], inventario:[], invFiltro:"todo",
   loaded:{e:false,g:false,t:false,c:false},
   tab:"inicio", mes:null, dia:null, periodo:"mes",
   sheet:null, offline:false, slow:false
@@ -307,9 +308,13 @@ function cuotas(g){
   }
   return out;
 }
+function compras(){
+  return [...S.gastos.map(g => ({ref:g, col:"gastos", fecha:g.fecha, monto:g.monto, metodo:g.metodo, tarjetaId:g.tarjetaId, msi:g.msi, descripcion:g.descripcion||g.categoria})),
+    ...S.inventario.map(i => ({ref:i, col:"inventario", fecha:i.fechaCompra, monto:i.costo, metodo:i.metodo, tarjetaId:i.tarjetaId, msi:i.msi, descripcion:i.nombre}))];
+}
 function compromisos(ym){
   const porTarjeta = {};
-  S.gastos.filter(g => g.metodo === "tarjeta").forEach(g => cuotas(g).forEach(q => {
+  compras().filter(g => g.metodo === "tarjeta").forEach(g => cuotas(g).forEach(q => {
     if (ymOf(iso(q.pago)) !== ym) return;
     const k = q.t.id;
     (porTarjeta[k] ||= {t:q.t, total:0, pago:q.pago, items:[]});
@@ -320,7 +325,7 @@ function compromisos(ym){
 }
 function msiActivas(){
   const h = parse(hoy());
-  return S.gastos.filter(g => g.metodo==="tarjeta" && (parseInt(g.msi)||1) > 1).map(g => {
+  return compras().filter(g => g.metodo==="tarjeta" && (parseInt(g.msi)||1) > 1).map(g => {
     const qs = cuotas(g); if (!qs.length) return null;
     const faltan = qs.filter(q => q.pago >= h);
     return faltan.length ? {g, qs, faltan, t:qs[0].t} : null;
@@ -330,10 +335,13 @@ function msiActivas(){
 /* ---------- Resumen mensual ---------- */
 function resumen(ym){
   const cobrado = sum(S.eventos.flatMap(e => (e.abonos||[]).filter(a => ymOf(a.fecha)===ym)), a=>a.monto);
-  const gastos = sum(S.gastos.filter(g => ymOf(g.fecha)===ym), g=>g.monto);
+  const inv = S.inventario.filter(i => ymOf(i.fechaCompra)===ym);
+  const insumos = sum(inv.filter(i => i.tipo!=="equipo"), i=>i.costo) + sum(S.inventario.flatMap(i => (i.reparaciones||[]).filter(r => ymOf(r.fecha)===ym)), r=>r.monto);
+  const inversion = sum(inv.filter(i => i.tipo==="equipo"), i=>i.costo);
+  const gastos = sum(S.gastos.filter(g => ymOf(g.fecha)===ym), g=>g.monto) + insumos;
   const evs = activos().filter(e => ymOf(e.fecha)===ym);
   const costos = sum(evs, evCostos);
-  return {cobrado, gastos, costos, eventos:evs.length, vendido:sum(evs, evTotal), resultado:cobrado-gastos-costos};
+  return {cobrado, gastos, insumos, inversion, costos, eventos:evs.length, vendido:sum(evs, evTotal), resultado:cobrado-gastos-costos};
 }
 
 /* ---------- Render ---------- */
@@ -343,7 +351,7 @@ function render(){
   const m = $("#main");
   const listo = S.loaded.e && S.loaded.g && S.loaded.t;
   if (!listo){ m.innerHTML = S.slow ? `<div class="notice stack">${esc(S.errorMsg||"No se pudo conectar con tu hoja de Google. Revisa tu internet.")}<button class="btn small" data-act="sync">Reintentar</button></div>` : '<div class="empty"><b>Cargando tus datos…</b>Un momento.</div>'; return; }
-  m.innerHTML = ({inicio:vInicio, agenda:vAgenda, gastos:vGastos, tarjetas:vTarjetas, reportes:vReportes}[S.tab])();
+  m.innerHTML = ({inicio:vInicio, agenda:vAgenda, gastos:vGastos, inventario:vInventario, tarjetas:vTarjetas, reportes:vReportes}[S.tab])();
 }
 
 function filaEvento(e){
@@ -372,6 +380,7 @@ function vInicio(){
       <div class="stat"><b>${money(r.gastos)}</b><span>Gastos</span></div>
       <div class="stat"><b>${r.costos?money(r.costos):r.eventos}</b><span>${r.costos?'Costos de eventos':'Eventos'}</span></div>
     </div>
+    ${r.inversion?`<button class="link" data-act="tab" data-t="inventario" style="margin-top:12px;text-decoration:none;text-align:left">Inversión en equipo este mes: <b class="num" style="color:var(--ivory)">${money(r.inversion)}</b> <span class="dim">(no se resta)</span></button>`:''}
   </section>
   <div class="quick">
     <button class="btn primary" data-act="nuevo-evento">+ Evento</button>
@@ -448,6 +457,7 @@ function vGastos(){
     <div class="eyebrow">Total de ${mesNombre(S.mes)}</div>
     <div style="font-family:var(--f-display);font-size:36px;font-weight:600;line-height:1.1;margin-top:4px" class="num">${money(total)}</div>
     <div class="muted" style="font-size:13px">Fijos ${money(fijos)} · Variables ${money(total-fijos)}</div>
+    ${resumen(S.mes).insumos?`<button class="link" data-act="tab" data-t="inventario" style="margin-top:6px;text-decoration:none">+ ${money(resumen(S.mes).insumos)} en insumos, accesorios y reparaciones (ver Inventario)</button>`:''}
     ${catArr.length ? `<div style="margin-top:14px">${catArr.map(([k,v])=>`<div class="hbar"><span>${esc(k)}</span><b class="num">${money(v)}</b><div class="track"><i style="width:${v/max*100}%"></i></div></div>`).join("")}</div>` : ''}
   </section>
   ${gs.length ? `<div class="list">${gs.map(filaGasto).join("")}</div>` :
@@ -468,8 +478,8 @@ function vTarjetas(){
   </section>
   <section class="stack">
     <span class="eyebrow">Compras a meses sin intereses</span>
-    ${msi.length ? `<div class="list">${msi.map(x=>{const pag=x.qs.length-x.faltan.length;return `<button class="item" data-act="editar-gasto" data-id="${x.g.id}"><div class="body">
-      <div class="title">${esc(x.g.descripcion||x.g.categoria)}</div>
+    ${msi.length ? `<div class="list">${msi.map(x=>{const pag=x.qs.length-x.faltan.length;return `<button class="item" data-act="${x.g.col==='gastos'?'editar-gasto':'ver-item'}" data-id="${x.g.ref.id}"><div class="body">
+      <div class="title">${esc(x.g.descripcion)}</div>
       <div class="sub">${esc(tarjetaNombre(x.t))} · ${money(x.qs[0].monto)} al mes · faltan ${x.faltan.length} de ${x.qs.length}</div>
       <div class="bar"><i style="width:${pag/x.qs.length*100}%"></i></div></div>
       <div class="amt">${money(sum(x.faltan,q=>q.monto))}<div class="sub" style="text-align:right">por pagar</div></div></button>`}).join("")}</div>` :
@@ -714,13 +724,14 @@ async function guardarEvLineas(id, mut, msg){
 }
 
 /* Gastos */
-function hojaGasto(g){
-  const c = cfg(), nuevo = !g; g = g || {tipo:"variable", metodo:"efectivo", fecha:hoy(), hora:ahoraHora()};
+function hojaGasto(g, pre){
+  const c = cfg(), nuevo = !g; g = g || Object.assign({tipo:"variable", metodo:"efectivo", fecha:hoy(), hora:ahoraHora()}, pre||{});
   const cats = g.tipo==="fijo" ? c.fijos : c.variables;
   const metodoVal = g.metodo==="tarjeta" ? "t:"+g.tarjetaId : g.metodo;
   openSheet(`
-  <h3>${nuevo?'Nuevo gasto':'Editar gasto'}</h3>
+  <h3>${nuevo?'Registrar compra':'Editar gasto'}</h3>
   <form id="fGasto" class="stack" data-id="${g.id||''}" novalidate>
+    ${nuevo?segCompra("gasto"):''}
     <div class="grid2">
       <div class="field"><label for="g-monto">Monto total</label><input id="g-monto" inputmode="decimal" required value="${g.monto!=null?g.monto:''}"></div>
       <div class="field"><label for="g-fecha">Fecha</label><input id="g-fecha" type="date" required value="${esc(g.fecha)}"></div>
@@ -816,7 +827,7 @@ async function guardarGasto(form){
 /* Tarjetas */
 function hojaTarjeta(t){
   const nuevo = !t; t = t || {};
-  const usada = t.id && S.gastos.some(g=>g.tarjetaId===t.id);
+  const usada = t.id && compras().some(g=>g.tarjetaId===t.id);
   openSheet(`
   <h3>${nuevo?'Nueva tarjeta':'Editar tarjeta'}</h3>
   <form id="fTarjeta" class="stack" data-id="${t.id||''}" novalidate>
@@ -895,6 +906,203 @@ async function guardarConfig(nc, silencioso){
   catch(_){ if (!silencioso) toast("No se pudo guardar."); return false; }
 }
 
+/* ---------- Inventario: equipo, insumos y accesorios ---------- */
+const TIPOS_INV = {equipo:"Equipo", insumo:"Insumo", accesorio:"Accesorio"};
+const ESTADOS = {uso:"En uso", terminado:"Terminado", reemplazado:"Reemplazado", vendido:"Vendido", danado:"Dañado"};
+const itemActivo = i => (i.estado || "uso") === "uso";
+function itemCalc(i){
+  const ini = i.fechaCompra || hoy(), fin = itemActivo(i) ? hoy() : (i.fechaBaja || hoy());
+  const dias = Math.max(0, Math.round((parse(fin) - parse(ini)) / 86400000));
+  const tope = fin < hoy() ? fin : hoy();
+  const evs = activos().filter(e => e.fecha >= ini && e.fecha <= tope).length;
+  const rep = sum(i.reparaciones||[], r=>r.monto);
+  const neto = (+i.costo||0) + rep - (i.estado === "vendido" ? (+i.valorVenta||0) : 0);
+  return {dias, evs, rep, neto, porEvento: evs ? neto/evs : 0};
+}
+function duracion(d){
+  if (d < 31) return d + " día" + (d === 1 ? "" : "s");
+  const m = Math.floor(d / 30.44), a = Math.floor(m / 12), r = m % 12;
+  return (a ? a + " año" + (a > 1 ? "s" : "") : "") + (a && r ? " " : "") + (r ? r + " mes" + (r > 1 ? "es" : "") : "");
+}
+const pillItem = i => itemActivo(i) ? '<span class="pill ok">En uso</span>' : `<span class="pill off">${ESTADOS[i.estado] || "Baja"}</span>`;
+const segCompra = sel => `<div class="seg" aria-label="Tipo de compra">${[["gasto","Gasto"],["equipo","Equipo"],["insumo","Insumo"],["accesorio","Accesorio"]].map(([k,l]) => `<button type="button" class="${sel===k?'on':''}" data-act="tipo-compra" data-v="${k}">${l}</button>`).join("")}</div>`;
+
+function vInventario(){
+  const f = S.invFiltro || "todo", y = S.mes.slice(0,4);
+  const items = S.inventario.filter(i => f === "todo" || i.tipo === f)
+    .sort((a,b) => (itemActivo(b) - itemActivo(a)) || (b.fechaCompra||"").localeCompare(a.fechaCompra||""));
+  const eq = S.inventario.filter(i => i.tipo === "equipo"), eqUso = eq.filter(itemActivo);
+  const insAnio = sum(S.inventario.filter(i => i.tipo !== "equipo" && (i.fechaCompra||"").startsWith(y)), i=>i.costo);
+  return `
+  <div class="sec-head"><h2 class="sec">Inventario</h2><button class="btn primary small" data-act="nuevo-item" data-tipo="${f==='todo'?'equipo':f}">+ Agregar</button></div>
+  <section class="panel">
+    <div class="eyebrow">Equipo en uso</div>
+    <div style="font-family:var(--f-display);font-size:36px;font-weight:600;line-height:1.1;margin-top:4px" class="num">${money(sum(eqUso, i=>i.costo))}</div>
+    <div class="muted" style="font-size:13px">${eqUso.length} equipo${eqUso.length===1?'':'s'} · invertido en ${y}: ${money(sum(eq.filter(i => (i.fechaCompra||"").startsWith(y)), i=>i.costo))} · insumos y accesorios ${y}: ${money(insAnio)}</div>
+  </section>
+  <div class="seg">${[["todo","Todo"],["equipo","Equipo"],["insumo","Insumos"],["accesorio","Accesorios"]].map(([k,l]) => `<button class="${f===k?'on':''}" data-act="inv-filtro" data-f="${k}">${l}</button>`).join("")}</div>
+  ${items.length ? `<div class="list">${items.map(filaItem).join("")}</div>` :
+    `<div class="empty"><b>Nada registrado aquí</b>Agrega tu equipo, tus insumos (como los rollos de papel) o tus accesorios. Así verás cuánto te dura cada cosa y cuánto te cuesta por evento.</div>`}`;
+}
+function filaItem(i){
+  const c = itemCalc(i), d = parse(i.fechaCompra || hoy());
+  return `<button class="item" data-act="ver-item" data-id="${i.id}">
+    <div class="date"><b class="num">${d.getDate()}</b><span>${mesCorto(ymOf(i.fechaCompra||hoy()))} ${String(d.getFullYear()).slice(2)}</span></div>
+    <div class="body"><div class="title">${esc(i.nombre)}</div>
+    <div class="sub">${TIPOS_INV[i.tipo]||""} · ${itemActivo(i)?'lleva':'duró'} ${duracion(c.dias)} · ${c.evs} evento${c.evs===1?'':'s'}</div></div>
+    <div class="amt">${money(i.costo)}<div style="margin-top:3px">${pillItem(i)}</div></div></button>`;
+}
+
+function bloquePago(p, it){
+  const val = it.metodo === "tarjeta" ? "t:" + it.tarjetaId : (it.metodo || "efectivo");
+  return `<div class="field"><label for="${p}-metodo">Forma de pago</label><select id="${p}-metodo">
+      <option value="efectivo" ${val==='efectivo'?'selected':''}>Efectivo</option>
+      <option value="transferencia" ${val==='transferencia'?'selected':''}>Transferencia</option>
+      ${S.tarjetas.map(t => `<option value="t:${t.id}" ${val==='t:'+t.id?'selected':''}>${esc(tarjetaNombre(t))}</option>`).join("")}
+      <option value="nueva">+ Tarjeta nueva…</option></select></div>
+    <div id="${p}-tn" class="sub-box" hidden>${camposTarjeta({}, p+"t")}</div>
+    <div class="field" id="${p}-msibox" hidden><label for="${p}-msi">¿A cuántos meses?</label><select id="${p}-msi">
+      ${[1,3,6,9,12,18,24].map(n => `<option value="${n}" ${(parseInt(it.msi)||1)===n?'selected':''}>${n===1?'Una sola exhibición':n+' meses sin intereses'}</option>`).join("")}</select>
+      <span class="hint" id="${p}-msihint"></span></div>`;
+}
+function syncPago(form, p, montoSel){
+  const m = form.querySelector("#"+p+"-metodo").value, nueva = m === "nueva";
+  form.querySelector("#"+p+"-tn").hidden = !nueva;
+  const cred = nueva ? form.querySelector("#"+p+"t-clase").value === "credito" : (m.startsWith("t:") && esCredito(tarjetaDe(m.slice(2))));
+  if (nueva) form.querySelector("."+p+"t-cred").hidden = !cred;
+  form.querySelector("#"+p+"-msibox").hidden = !cred;
+  const n = parseInt(form.querySelector("#"+p+"-msi").value) || 1, monto = num(form.querySelector(montoSel).value);
+  form.querySelector("#"+p+"-msihint").textContent = cred && n > 1 && monto ? `Pagarás ${money(monto/n)} al mes durante ${n} meses.` : "";
+}
+async function leerPago(form, p){
+  let m = form.querySelector("#"+p+"-metodo").value, tarjetaId = null;
+  if (m === "nueva"){
+    const r = leerTarjeta(form, p+"t"); if (r.err) return {err:r.err};
+    const ref = S.db.collection("tarjetas").doc(); await ref.set(r.t); tarjetaId = ref.id; m = "tarjeta";
+  } else if (m.startsWith("t:")){ tarjetaId = m.slice(2); m = "tarjeta"; }
+  const t = tarjetaId ? tarjetaDe(tarjetaId) : null;
+  return {metodo:m, tarjetaId, msi: esCredito(t) ? (parseInt(form.querySelector("#"+p+"-msi").value) || 1) : 1};
+}
+
+function hojaItem(i, tipoIni, pre){
+  const nuevo = !i;
+  i = i || Object.assign({tipo: tipoIni || "equipo", fechaCompra: hoy(), estado: "uso", metodo: "efectivo"}, pre || {});
+  const ph = {equipo:"Ej. Cámara Canon R50", insumo:"Ej. Rollo DNP 4x6", accesorio:"Ej. Pelucas de colores"}[i.tipo];
+  openSheet(`
+  <h3>${nuevo ? 'Registrar compra' : 'Editar ' + TIPOS_INV[i.tipo].toLowerCase()}</h3>
+  <form id="fItem" class="stack" data-id="${i.id||''}" novalidate>
+    ${nuevo ? segCompra(i.tipo) : ''}
+    ${nuevo ? `<span class="hint">${{equipo:"Lo que dura muchos eventos y es una inversión: cámara, impresora, plataforma, luces. No se resta de lo que te quedó en el mes.", insumo:"Lo que se consume en los eventos: papel, tinta, imanes, álbumes. Cuenta como gasto del mes.", accesorio:"Utilería que se desgasta: pelucas, lentes, sombreros, props. Cuenta como gasto del mes."}[i.tipo]}</span>` : ''}
+    <input type="hidden" id="it-tipo" value="${i.tipo}">
+    <div class="field"><label for="it-nombre">¿Qué compraste?</label><input id="it-nombre" value="${esc(i.nombre)}" placeholder="${ph}" autocomplete="off"></div>
+    <div class="grid2">
+      <div class="field"><label for="it-costo">Costo total</label><input id="it-costo" inputmode="decimal" value="${i.costo ?? ''}"></div>
+      <div class="field"><label for="it-fecha">Fecha de compra</label><input id="it-fecha" type="date" value="${esc(i.fechaCompra)}"></div>
+    </div>
+    ${i.tipo !== 'equipo' ? `<div class="field"><label for="it-cant">Cantidad <span class="dim">(opcional)</span></label><input id="it-cant" value="${esc(i.cantidad)}" placeholder="Ej. 2 rollos"></div>` : ''}
+    ${bloquePago("it", i)}
+    ${nuevo ? '' : `<div class="grid2">
+      <div class="field"><label for="it-estado">Estado</label><select id="it-estado">${Object.entries(ESTADOS).map(([k,v]) => `<option value="${k}" ${(i.estado||'uso')===k?'selected':''}>${v}</option>`).join("")}</select></div>
+      <div class="field" id="it-bajabox"><label for="it-baja">Dejó de usarse el</label><input id="it-baja" type="date" value="${esc(i.fechaBaja || hoy())}"></div></div>
+      <div class="field" id="it-ventabox"><label for="it-venta">¿En cuánto lo vendiste?</label><input id="it-venta" inputmode="decimal" value="${i.valorVenta || ''}"></div>`}
+    <div class="field"><label for="it-notas">Notas</label><textarea id="it-notas" placeholder="Modelo, número de serie, dónde lo compraste…">${esc(i.notas)}</textarea></div>
+    <div class="err" id="it-err"></div>
+    <button class="btn primary block" type="submit">${nuevo ? 'Guardar en inventario' : 'Guardar cambios'}</button>
+    <button class="btn ghost block" type="button" data-act="${nuevo ? 'cerrar' : 'ver-item'}" data-id="${i.id||''}">${nuevo ? 'Cancelar' : 'Volver'}</button>
+  </form>`, {type:"form"});
+  syncItemForm();
+}
+function syncItemForm(){
+  const f = $("#fItem"); if (!f) return;
+  syncPago(f, "it", "#it-costo");
+  const e = f.querySelector("#it-estado");
+  if (e){ f.querySelector("#it-bajabox").hidden = e.value === "uso"; f.querySelector("#it-ventabox").hidden = e.value !== "vendido"; }
+}
+async function guardarItem(form){
+  const id = form.dataset.id, err = form.querySelector("#it-err");
+  const v = s => (form.querySelector(s)?.value ?? "").trim();
+  const costo = num(v("#it-costo"));
+  if (!v("#it-nombre")) return err.textContent = "Escribe qué compraste.";
+  if (!(costo > 0)) return err.textContent = "Escribe el costo.";
+  if (!v("#it-fecha")) return err.textContent = "Elige la fecha de compra.";
+  try {
+    const pago = await leerPago(form, "it"); if (pago.err) return err.textContent = pago.err;
+    const prev = id ? clone(S.inventario.find(x => x.id === id)) : {}; delete prev.id;
+    const estado = v("#it-estado") || "uso";
+    const obj = Object.assign(prev, {
+      tipo: v("#it-tipo"), nombre: v("#it-nombre"), costo, fechaCompra: v("#it-fecha"), cantidad: v("#it-cant"), notas: v("#it-notas"),
+      estado, fechaBaja: estado === "uso" ? "" : (v("#it-baja") || hoy()), valorVenta: estado === "vendido" ? num(v("#it-venta")) : 0,
+      reparaciones: prev.reparaciones || [], actualizado: new Date().toISOString()
+    }, pago);
+    if (!id) obj.creado = new Date().toISOString();
+    const ref = id ? S.db.collection("inventario").doc(id) : S.db.collection("inventario").doc();
+    await ref.set(obj);
+    toast(id ? "Cambios guardados" : "Guardado en inventario");
+    verItem(ref.id);
+  } catch(_){ err.textContent = "No se pudo guardar. Revisa tu conexión e intenta de nuevo."; }
+}
+function verItem(id){
+  const i = S.inventario.find(x => x.id === id); if (!i) return closeSheet();
+  const c = itemCalc(i), t = i.metodo === "tarjeta" ? tarjetaDe(i.tarjetaId) : null;
+  const pagado = i.metodo === "tarjeta" ? esc(tarjetaNombre(t)) + ((parseInt(i.msi)||1) > 1 ? " · " + i.msi + " MSI" : "") : (i.metodo === "transferencia" ? "Transferencia" : "Efectivo");
+  openSheet(`
+  <div class="row"><span class="eyebrow">${TIPOS_INV[i.tipo]}</span>${pillItem(i)}</div>
+  <h3>${esc(i.nombre)}</h3>
+  <div class="detail-k">
+    <div class="kv"><span>Comprado</span><b>${fechaCorta(i.fechaCompra)} ${String(i.fechaCompra).slice(0,4)}</b></div>
+    <div class="kv"><span>Pagado con</span><b>${pagado}</b></div>
+    ${i.cantidad ? `<div class="kv"><span>Cantidad</span><b>${esc(i.cantidad)}</b></div>` : ''}
+    ${!itemActivo(i) ? `<div class="kv"><span>Dejó de usarse</span><b>${fechaCorta(i.fechaBaja || hoy())} ${String(i.fechaBaja || hoy()).slice(0,4)}</b></div>` : ''}
+    ${i.notas ? `<div class="kv" style="grid-column:1/-1"><span>Notas</span><b style="font-weight:500">${esc(i.notas)}</b></div>` : ''}
+  </div>
+  <div class="money-strip">
+    <div><b>${duracion(c.dias)}</b><span>${itemActivo(i) ? 'Lleva en uso' : 'Le duró'}</span></div>
+    <div><b>${c.evs}</b><span>Eventos cubiertos</span></div>
+    <div><b>${c.evs ? money(c.porEvento) : '—'}</b><span>Costo por evento</span></div>
+  </div>
+  <div class="hint">${c.rep || (i.estado === 'vendido' && i.valorVenta) ? `Costo ${money(i.costo)}${c.rep ? ' + reparaciones ' + money(c.rep) : ''}${i.estado === 'vendido' && i.valorVenta ? ' − venta ' + money(i.valorVenta) : ''} = ${money(c.neto)}. ` : ''}Los eventos cubiertos son los que registraste entre la compra y ${itemActivo(i) ? 'hoy' : 'la fecha en que dejó de usarse'}.</div>
+  ${i.tipo !== "insumo" ? `<div class="sub-box">
+    <div class="row"><span class="lbl-s">Reparaciones y mantenimiento</span><button class="btn small" data-act="form-rep" data-id="${i.id}">+ Agregar</button></div>
+    ${(i.reparaciones||[]).length ? i.reparaciones.map((r,k) => `<div class="row"><div>${esc(r.concepto)} <b class="num">${money(r.monto)}</b> <span class="muted" style="font-size:13px">· ${fechaCorta(r.fecha)}</span></div>
+      <button class="x" style="width:38px;flex:0 0 auto" data-act="borrar-rep" data-id="${i.id}" data-i="${k}" aria-label="Borrar reparación">✕</button></div>`).join("") : '<span class="hint">Sin reparaciones registradas.</span>'}
+  </div>` : ''}
+  ${i.tipo === "insumo" && itemActivo(i) ? `<button class="btn" data-act="terminar-item" data-id="${i.id}">Se terminó hoy</button>` : ''}
+  <div class="grid2">
+    <button class="btn" data-act="editar-item" data-id="${i.id}">${itemActivo(i) && i.tipo !== "insumo" ? 'Editar o dar de baja' : 'Editar'}</button>
+    <button class="btn danger" data-act="borrar" data-col="inventario" data-id="${i.id}">Borrar</button>
+  </div>
+  <button class="btn ghost block" data-act="cerrar">Cerrar</button>`, {type:"item", id:i.id});
+}
+function hojaRep(id){
+  const i = S.inventario.find(x => x.id === id); if (!i) return;
+  openSheet(`
+  <h3>Reparación o mantenimiento</h3>
+  <div class="muted" style="margin-top:-8px">${esc(i.nombre)}</div>
+  <form id="fRep" class="stack" data-id="${id}" novalidate>
+    <div class="field"><label for="rp-c">Concepto</label><input id="rp-c" placeholder="Ej. Limpieza de cabezal"></div>
+    <div class="grid2">
+      <div class="field"><label for="rp-m">Monto</label><input id="rp-m" inputmode="decimal"></div>
+      <div class="field"><label for="rp-f">Fecha</label><input id="rp-f" type="date" value="${hoy()}"></div>
+    </div>
+    <span class="hint">Cuenta como gasto del mes en que la pagaste.</span>
+    <div class="err" id="rp-err"></div>
+    <button class="btn primary block" type="submit">Guardar</button>
+    <button class="btn ghost block" type="button" data-act="ver-item" data-id="${id}">Volver</button>
+  </form>`, {type:"form"});
+}
+async function guardarRep(form){
+  const err = form.querySelector("#rp-err"), concepto = form.querySelector("#rp-c").value.trim(), monto = num(form.querySelector("#rp-m").value);
+  if (!concepto) return err.textContent = "Escribe qué se reparó o qué mantenimiento se hizo.";
+  if (!(monto > 0)) return err.textContent = "Escribe el monto.";
+  await guardarItemCambio(form.dataset.id, o => o.reparaciones.push({fecha: form.querySelector("#rp-f").value || hoy(), concepto, monto}), "Reparación guardada");
+}
+async function guardarItemCambio(id, mut, msg){
+  const i = S.inventario.find(x => x.id === id); if (!i) return;
+  const o = clone(i); delete o.id; o.reparaciones = o.reparaciones || []; mut(o); o.actualizado = new Date().toISOString();
+  try { await S.db.collection("inventario").doc(id).set(o); toast(msg); verItem(id); }
+  catch(_){ toast("No se pudo guardar. Revisa tu conexión."); }
+}
+
 /* ---------- Exportar a Excel ---------- */
 async function exportarExcel(){
   if (!window.XLSX){ toast("El exportador no cargó. Revisa tu conexión."); return; }
@@ -910,11 +1118,16 @@ async function exportarExcel(){
     "Tarjeta":g.metodo==="tarjeta"?tName(g.tarjetaId):"","Meses sin intereses":(parseInt(g.msi)||1)>1?+g.msi:"","Mensualidad":(parseInt(g.msi)||1)>1?(+g.monto/g.msi):""}));
   const hojaTj = S.tarjetas.map(t=>({"Banco":t.banco,"Tarjeta":t.nombre||"","Últimos 4":t.ultimos4,"Tipo":esCredito(t)?"Crédito":"Débito","Día de corte":t.diaCorte||"","Día de pago":t.diaPago||""}));
   const yms = [...new Set([...S.eventos.map(e=>ymOf(e.fecha)), ...S.gastos.map(g=>ymOf(g.fecha)), ...S.eventos.flatMap(e=>(e.abonos||[]).map(a=>ymOf(a.fecha)))])].filter(Boolean).sort();
-  const hojaRes = yms.map(ym=>{const r=resumen(ym);return {"Mes":mesNombre(ym),"Eventos":r.eventos,"Vendido (eventos del mes)":r.vendido,"Cobrado":r.cobrado,"Gastos":r.gastos,"Costos de eventos":r.costos,"Te quedó":r.resultado};});
+  S.inventario.forEach(i => { yms.push(ymOf(i.fechaCompra)); (i.reparaciones||[]).forEach(r => yms.push(ymOf(r.fecha))); });
+  const ymsT = [...new Set(yms)].filter(Boolean).sort();
+  const hojaRes = ymsT.map(ym=>{const r=resumen(ym);return {"Mes":mesNombre(ym),"Eventos":r.eventos,"Vendido (eventos del mes)":r.vendido,"Cobrado":r.cobrado,"Gastos (incluye insumos y reparaciones)":r.gastos,"Insumos, accesorios y reparaciones":r.insumos,"Costos de eventos":r.costos,"Te quedó":r.resultado,"Inversión en equipo":r.inversion};});
+  const hojaInv = [...S.inventario].sort((a,b)=>(a.fechaCompra||"").localeCompare(b.fechaCompra||"")).map(i=>{const c=itemCalc(i);return {"Tipo":TIPOS_INV[i.tipo],"Nombre":i.nombre,"Fecha de compra":i.fechaCompra,"Costo":+i.costo||0,"Cantidad":i.cantidad||"",
+    "Forma de pago":i.metodo==="tarjeta"?"Tarjeta":(i.metodo==="transferencia"?"Transferencia":"Efectivo"),"Tarjeta":i.metodo==="tarjeta"?tName(i.tarjetaId):"","Meses sin intereses":(parseInt(i.msi)||1)>1?+i.msi:"",
+    "Estado":ESTADOS[i.estado||"uso"],"Fecha de baja":i.fechaBaja||"","Valor de venta":+i.valorVenta||0,"Reparaciones":c.rep,"Días de uso":c.dias,"Eventos cubiertos":c.evs,"Costo por evento":c.evs?Math.round(c.porEvento*100)/100:"","Notas":i.notas||""};});
   const wb = XLSX.utils.book_new();
   const add = (rows, name, vacio) => XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows.length?rows:[vacio]), name);
   add(hojaRes,"Resumen mensual",{"Mes":"Sin datos"}); add(hojaEv,"Eventos",{"Fecha":"Sin datos"}); add(hojaAb,"Abonos",{"Fecha del abono":"Sin datos"});
-  add(hojaCo,"Costos de eventos",{"Concepto":"Sin datos"}); add(hojaGa,"Gastos",{"Fecha":"Sin datos"}); add(hojaTj,"Tarjetas",{"Banco":"Sin datos"});
+  add(hojaCo,"Costos de eventos",{"Concepto":"Sin datos"}); add(hojaGa,"Gastos",{"Fecha":"Sin datos"}); add(hojaInv,"Inventario",{"Nombre":"Sin datos"}); add(hojaTj,"Tarjetas",{"Banco":"Sin datos"});
   try { XLSX.writeFile(wb, `ECA-contabilidad-${hoy()}.xlsx`); toast("Excel descargado"); }
   catch(_){ toast("No se pudo generar el Excel."); }
 }
@@ -944,6 +1157,20 @@ document.addEventListener("click", async ev => {
     case "ver-evento": case "volver-evento": verEvento(id); break;
     case "nuevo-gasto": if (S.db) hojaGasto(null); break;
     case "editar-gasto": hojaGasto(S.gastos.find(g=>g.id===id)); break;
+    case "ver-item": verItem(id); break;
+    case "nuevo-item": if (S.db) hojaItem(null, b.dataset.tipo); break;
+    case "editar-item": hojaItem(S.inventario.find(i=>i.id===id)); break;
+    case "inv-filtro": S.invFiltro = b.dataset.f; render(); break;
+    case "form-rep": hojaRep(id); break;
+    case "terminar-item": {
+      if (!b.dataset.armed){ b.dataset.armed = "1"; b.textContent = "Toca otra vez para confirmar"; return; }
+      guardarItemCambio(id, o => { o.estado = "terminado"; o.fechaBaja = hoy(); }, "Marcado como terminado"); break; }
+    case "borrar-rep": {
+      if (!b.classList.contains("armed")){ b.classList.add("armed"); b.textContent = "¿Sí?"; setTimeout(()=>{ if(b.isConnected){ b.classList.remove("armed"); b.textContent="✕"; } }, 4000); return; }
+      const k = +b.dataset.i; guardarItemCambio(id, o => o.reparaciones.splice(k,1), "Borrado"); break; }
+    case "tipo-compra": {
+      const f = b.closest("form"), monto = f.querySelector("#g-monto, #it-costo")?.value || "", fecha = f.querySelector("#g-fecha, #it-fecha")?.value || hoy();
+      if (b.dataset.v === "gasto") hojaGasto(null, {monto, fecha}); else hojaItem(null, b.dataset.v, {costo:monto, fechaCompra:fecha}); break; }
     case "nueva-tarjeta": if (S.db) hojaTarjeta(null); break;
     case "editar-tarjeta": hojaTarjeta(S.tarjetas.find(t=>t.id===id)); break;
     case "form-abono": hojaLinea("abonos", id); break;
@@ -974,8 +1201,9 @@ document.addEventListener("change", ev => {
   if (t.id === "ev-paq"){ const o = t.selectedOptions[0]; if (o && o.dataset.precio){ $("#ev-precio").value = o.dataset.precio; $("#ev-horas").value = o.dataset.horas; } }
   if (t.closest("#fGasto")) syncGastoForm();
   if (t.id === "tj-clase") syncTarjetaForm();
+  if (t.closest("#fItem")) syncItemForm();
 });
-document.addEventListener("input", ev => { if (ev.target.closest("#fGasto") && ev.target.id==="g-monto") syncGastoForm(); });
+document.addEventListener("input", ev => { if (ev.target.closest("#fGasto") && ev.target.id==="g-monto") syncGastoForm(); if (ev.target.id==="it-costo") syncItemForm(); });
 document.addEventListener("keydown", ev => {
   if (ev.key === "Escape" && S.sheet) closeSheet();
   if (ev.key === "Enter" && ev.target.closest(".add-line")){ ev.preventDefault(); ev.target.closest(".add-line").querySelector("button").click(); }
@@ -989,6 +1217,8 @@ document.addEventListener("submit", async ev => {
     else if (f.id === "fEvento") await guardarEvento(f);
     else if (f.id === "fGasto") await guardarGasto(f);
     else if (f.id === "fTarjeta") await guardarTarjeta(f);
+    else if (f.id === "fItem") await guardarItem(f);
+    else if (f.id === "fRep") await guardarRep(f);
     else if (f.id === "fAjustes") await guardarAjustes(f);
     else if (f.id === "fLinea"){
       const monto = num(f.querySelector("#ln-monto").value), err = f.querySelector("#ln-err");
@@ -1009,7 +1239,7 @@ const LS_CONF = "eca-conexion", LS_CACHE = "eca-datos";
 const lsGet = k => { try { return JSON.parse(localStorage.getItem(k) || "null"); } catch(_){ return null; } };
 const lsSet = (k, v) => { try { v === null ? localStorage.removeItem(k) : localStorage.setItem(k, JSON.stringify(v)); } catch(_){} };
 const nuevoId = () => "x" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-const COLS = {eventos:"eventos", gastos:"gastos", tarjetas:"tarjetas"};
+const COLS = {eventos:"eventos", gastos:"gastos", tarjetas:"tarjetas", inventario:"inventario"};
 
 async function api(accion, payload, conf){
   conf = conf || lsGet(LS_CONF);
@@ -1023,7 +1253,7 @@ async function api(accion, payload, conf){
     return j;
   } finally { clearTimeout(t); }
 }
-function guardarCache(){ lsSet(LS_CACHE, {eventos:S.eventos, gastos:S.gastos, tarjetas:S.tarjetas, config:S.config}); }
+function guardarCache(){ lsSet(LS_CACHE, {eventos:S.eventos, gastos:S.gastos, tarjetas:S.tarjetas, inventario:S.inventario, config:S.config}); }
 function aplicarLocal(col, id, obj){
   const nuevo = Object.assign({id}, clone(obj)), arr = S[COLS[col]], i = arr.findIndex(x => x.id === id);
   S[COLS[col]] = i >= 0 ? arr.map(x => x.id === id ? nuevo : x) : [...arr, nuevo];
@@ -1035,7 +1265,7 @@ function crearDb(){
     id,
     async set(obj){
       const datos = clone(obj);
-      if (col === "gastos" && datos.tarjetaId) datos.tarjetaNombre = tarjetaNombre(tarjetaDe(datos.tarjetaId));
+      if (datos.tarjetaId) datos.tarjetaNombre = tarjetaNombre(tarjetaDe(datos.tarjetaId));
       await api("guardar", {col, id, datos});
       aplicarLocal(col, id, datos);
     },
@@ -1049,10 +1279,11 @@ function crearDb(){
 async function sincronizar(silencioso){
   try {
     const r = await api("todo");
-    S.eventos = r.eventos || []; S.gastos = r.gastos || []; S.tarjetas = r.tarjetas || []; S.config = r.config || null;
+    S.eventos = r.eventos || []; S.gastos = r.gastos || []; S.tarjetas = r.tarjetas || []; S.inventario = r.inventario || []; S.config = r.config || null;
     S.loaded = {e:true, g:true, t:true, c:true}; S.slow = false; S.errorMsg = "";
     guardarCache(); render();
     if (S.sheet && S.sheet.type === "evento") verEvento(S.sheet.id);
+    if (S.sheet && S.sheet.type === "item") verItem(S.sheet.id);
   } catch(e){
     const msg = /Clave incorrecta/.test(e.message) ? "La clave ya no coincide con la de tu hoja. Desconecta este celular en Ajustes y vuelve a conectarlo." : "";
     if (!S.loaded.e){ S.slow = true; S.errorMsg = msg; render(); }
@@ -1086,14 +1317,14 @@ async function conectarSetup(form){
 function desconectar(btn){
   if (!btn.dataset.armed){ btn.dataset.armed = "1"; btn.textContent = "Toca otra vez para desconectar"; return; }
   lsSet(LS_CONF, null); lsSet(LS_CACHE, null); closeSheet();
-  S.eventos = []; S.gastos = []; S.tarjetas = []; S.config = null; S.loaded = {e:false,g:false,t:false,c:false}; S.db = null;
+  S.eventos = []; S.gastos = []; S.tarjetas = []; S.inventario = []; S.config = null; S.loaded = {e:false,g:false,t:false,c:false}; S.db = null;
   mostrarSetup();
 }
 function conectar(){
   if (!lsGet(LS_CONF)){ mostrarSetup(); return; }
   S.db = crearDb();
   const cache = lsGet(LS_CACHE);
-  if (cache){ S.eventos = cache.eventos || []; S.gastos = cache.gastos || []; S.tarjetas = cache.tarjetas || []; S.config = cache.config || null; S.loaded = {e:true,g:true,t:true,c:true}; }
+  if (cache){ S.eventos = cache.eventos || []; S.gastos = cache.gastos || []; S.tarjetas = cache.tarjetas || []; S.inventario = cache.inventario || []; S.config = cache.config || null; S.loaded = {e:true,g:true,t:true,c:true}; }
   render();
   sincronizar(true);
 }

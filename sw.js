@@ -1,5 +1,5 @@
 // Guarda la app en el celular para que abra rápido; los datos siempre vienen de la hoja.
-const CACHE = "caja-eca-v1";
+const CACHE = "caja-eca-v2";
 const ARCHIVOS = ["./", "index.html", "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png",
   "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"];
 self.addEventListener("install", e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(ARCHIVOS)).then(() => self.skipWaiting())); });
